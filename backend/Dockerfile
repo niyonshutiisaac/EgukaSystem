@@ -10,10 +10,11 @@ RUN npm ci --omit=dev --no-audit --no-fund
 
 # ---- Build ----
 FROM base AS build
+ENV NODE_ENV=development
 COPY package.json package-lock.json ./
 COPY prisma.config.ts ./
 COPY prisma ./prisma
-RUN npm ci --no-audit --no-fund
+RUN npm ci --include=dev --no-audit --no-fund
 COPY tsconfig.json tsconfig.build.json nest-cli.json ./
 COPY src ./src
 RUN npx prisma generate && npm run build && npm prune --omit=dev
