@@ -1,0 +1,570 @@
+// EgukaSystem — PostgreSQL schema (Neon, shared-schema multi-tenancy)
+// Tenancy: app-level scoping via tenantId columns + TenantGuard (RLS is incompatible
+// with PgBouncer transaction-mode pooling, which Neon uses).
+// Money: all amounts are INTEGER (RWF has no subunit). Never use float for money.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DATABASE_URL_DIRECT")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum PlanId {
+  starter
+  growth
+  professional
+  enterprise
+}
+
+enum TenantStatus {
+  pending
+  trial
+  active
+  suspended
+  expired
+  rejected
+}
+
+enum Role {
+  superadmin
+  owner
+  manager
+  cashier
+  production
+  accountant
+}
+
+enum BusinessType {
+  bakery
+  cafe
+  restaurant
+  supermarket
+  pharmacy
+  distribution
+  retail
+  fashion
+  salon
+  gym
+  factory
+  clinic
+  other
+}
+
+enum RequestStatus {
+  pending
+  approved
+  rejected
+}
+
+enum SubscriptionStatus {
+  active
+  grace_period
+  cancelled
+}
+
+enum BatchStatus {
+  planned
+  started
+  completed
+  failed
+}
+
+enum SaleStatus {
+  completed
+  voided
+  refunded
+}
+
+enum PaymentMethod {
+  cash
+  mobile_money
+  card
+  bank
+  other
+}
+
+enum MovementType {
+  purchase
+  sale
+  adjustment
+  transfer
+  production_input
+  production_output
+  waste
+}
+
+enum ExpenseCategory {
+  rent
+  utilities
+  salaries
+  raw_materials
+  transport
+  marketing
+  maintenance
+  insurance
+  taxes
+  other
+}
+
+enum AiInsightType {
+  summary
+  forecast
+  anomaly
+  advice
+}
+
+// ---------------------------------------------------------------------------
+// Platform / Tenancy
+// ---------------------------------------------------------------------------
+
+model Tenant {
+  id           String       @id @default(cuid())
+  name         String
+  slug         String       @unique
+  businessType BusinessType
+  email        String
+  phone        String
+  countryCode  String       @default("+250")
+  region       String?
+  district     String?
+  status       TenantStatus @default(pending)
+  trialEndsAt  DateTime?
+  suspendedAt  DateTime?
+  aiCredits    Int          @default(100)
+  aiCreditLimit Int         @default(100)
+  planId       PlanId       @default(starter)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  plan          Plan     @relation(fields: [planId], references: [id])
+  branches      Branch[]
+  users         User[]
+  products      Product[]
+  recipes       Recipe[]
+  batches       Batch[]
+  sales         Sale[]
+  customers     Customer[]
+  customerPayments CustomerPayment[]
+  movements     InventoryMovement[]
+  suppliers     Supplier[]
+  supplierPayments SupplierPayment[]
+  expenses      Expense[]
+  subscriptions Subscription[]
+  registrationRequest RegistrationRequest?
+  auditLogs     AuditLog[]
+  notifications Notification[]
+  aiInsights    AiInsight[]
+
+  @@index([status])
+  @@index([planId])
+}
+
+model Branch {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  phone     String?
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  products  Product[]
+  sales     Sale[]
+  movements InventoryMovement[]
+  expenses  Expense[]
+
+  @@index([tenantId])
+}
+
+model User {
+  id           String   @id @default(cuid())
+  tenantId     String?
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(manager)
+  phone        String?
+  status       String   @default("active")
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  sales            Sale[]
+  inventoryMovements InventoryMovement[]
+  expenses         Expense[]
+  customerPayments CustomerPayment[]
+  supplierPayments SupplierPayment[]
+  auditLogs        AuditLog[]
+  notifications    Notification[]
+  createdBatches   Batch[] @relation("BatchCreatedBy")
+  aiInsights       AiInsight[]
+
+  @@index([tenantId])
+  @@index([role])
+}
+
+model Plan {
+  id           PlanId @id
+  name         String
+  priceMonthly Int    // RWF per month, integer
+  seats        Int
+  aiCredits    Int
+  features     Json   // { multiBranch: boolean, production: boolean, ... }
+  sortOrder    Int    @default(0)
+  active       Boolean @default(true)
+
+  tenants Tenant[]
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id        String             @id @default(cuid())
+  tenantId  String
+  planId    PlanId
+  status    SubscriptionStatus @default(active)
+  amount    Int
+  startedAt DateTime           @default(now())
+  renewsAt  DateTime
+  trialEndsAt DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan   Plan   @relation(fields: [planId], references: [id])
+
+  @@index([tenantId])
+  @@index([renewsAt])
+}
+
+model RegistrationRequest {
+  id         String        @id @default(cuid())
+  tenantId   String        @unique
+  status     RequestStatus @default(pending)
+  reviewedBy String?
+  reviewedAt DateTime?
+  notes      String?
+  createdAt  DateTime      @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Catalog / Production
+// ---------------------------------------------------------------------------
+
+model Product {
+  id          String   @id @default(cuid())
+  tenantId    String
+  branchId    String?
+  name        String
+  sku         String
+  category    String?
+  unit        String   @default("pcs")
+  costPrice   Int?
+  salePrice   Int
+  stock       Int      @default(0)
+  minStock    Int      @default(0)
+  isIngredient Boolean @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  recipesAsOutput   Recipe[]          @relation("RecipeOutput")
+  recipeIngredients RecipeIngredient[]
+  saleItems         SaleItem[]
+  movements         InventoryMovement[]
+
+  @@unique([tenantId, sku])
+  @@index([tenantId, isActive])
+  @@index([tenantId, name])
+}
+
+model Recipe {
+  id        String   @id @default(cuid())
+  tenantId  String
+  productId String   // the finished product this recipe produces
+  name      String
+  outputQty Int      @default(1) // units produced per batch
+  version   Int      @default(1)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product     Product @relation("RecipeOutput", fields: [productId], references: [id])
+  ingredients RecipeIngredient[]
+  batches     Batch[]
+
+  @@index([tenantId, isActive])
+}
+
+model RecipeIngredient {
+  id         String  @id @default(cuid())
+  recipeId   String
+  productId  String  // must be a product with isIngredient = true
+  quantity   Int     // units of the ingredient consumed per batch
+  wastePercent Float? @default(0)
+
+  recipe  Recipe  @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([recipeId])
+}
+
+model Batch {
+  id            String      @id @default(cuid())
+  tenantId      String
+  recipeId      String
+  batchNo       String
+  status        BatchStatus @default(planned)
+  plannedQty    Int
+  startedAt     DateTime?
+  completedAt   DateTime?
+  completedQty  Int?
+  wasteQty      Int?
+  note          String?
+  createdById   String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  recipe  Recipe  @relation(fields: [recipeId], references: [id])
+  createdBy User? @relation("BatchCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, batchNo])
+  @@index([tenantId, status, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Commerce
+// ---------------------------------------------------------------------------
+
+model Sale {
+  id             String        @id @default(cuid())
+  tenantId       String
+  branchId       String?
+  saleNo         String
+  status         SaleStatus    @default(completed)
+  subtotal       Int
+  discount       Int           @default(0)
+  tax            Int           @default(0)
+  total          Int
+  paid           Int
+  change         Int           @default(0)
+  paymentMethod  PaymentMethod @default(cash)
+  customerId     String?
+  cashierId      String?
+  note           String?
+  idempotencyKey String?
+  createdAt      DateTime      @default(now())
+  voidedAt       DateTime?
+  voidedById     String?
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch   Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  cashier  User?    @relation(fields: [cashierId], references: [id], onDelete: SetNull)
+  items    SaleItem[]
+
+  @@unique([tenantId, saleNo])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([tenantId, status])
+  @@index([tenantId, customerId])
+}
+
+model SaleItem {
+  id        String @id @default(cuid())
+  saleId    String
+  productId String
+  qty       Int
+  unitPrice Int
+  lineTotal Int
+
+  sale    Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([saleId])
+  @@index([productId])
+}
+
+model Customer {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  phone     String?
+  email     String?
+  location  String?
+  balance   Int      @default(0)
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sales    Sale[]
+  payments CustomerPayment[]
+
+  @@index([tenantId, name])
+}
+
+model CustomerPayment {
+  id        String        @id @default(cuid())
+  tenantId  String
+  customerId String
+  amount    Int
+  method    PaymentMethod @default(cash)
+  note      String?
+  createdById String?
+  createdAt DateTime      @default(now())
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdBy User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, customerId, createdAt(sort: Desc)])
+}
+
+model Supplier {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  phone     String?
+  email     String?
+  address   String?
+  notes     String?
+  createdAt DateTime @default(now())
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  payments SupplierPayment[]
+
+  @@index([tenantId, name])
+}
+
+model SupplierPayment {
+  id          String        @id @default(cuid())
+  tenantId    String
+  supplierId  String
+  amount      Int
+  method      PaymentMethod @default(cash)
+  note        String?
+  createdById String?
+  createdAt   DateTime      @default(now())
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  createdBy User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, supplierId, createdAt(sort: Desc)])
+}
+
+model Expense {
+  id          String         @id @default(cuid())
+  tenantId    String
+  branchId    String?
+  category    ExpenseCategory @default(other)
+  amount      Int
+  description String?
+  incurredAt  DateTime       @default(now())
+  createdById String?
+  createdAt   DateTime       @default(now())
+
+  tenant   Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  createdBy User?  @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, incurredAt(sort: Desc)])
+  @@index([tenantId, category])
+}
+
+// ---------------------------------------------------------------------------
+// Ledger / Observability
+// ---------------------------------------------------------------------------
+
+model InventoryMovement {
+  id        String       @id @default(cuid())
+  tenantId  String
+  branchId  String?
+  productId String
+  type      MovementType
+  qty       Int // signed: negative = out
+  beforeQty Int
+  afterQty  Int
+  refType   String?
+  refId     String?
+  note      String?
+  createdById String?
+  createdAt DateTime     @default(now())
+
+  tenant   Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  product  Product @relation(fields: [productId], references: [id])
+  createdBy User?  @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, productId, createdAt(sort: Desc)])
+  @@index([tenantId, type, createdAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  tenantId  String?
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  meta      Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt(sort: Desc)])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  tenantId  String?
+  userId    String?
+  type      String
+  title     String
+  body      String
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@index([tenantId, createdAt(sort: Desc)])
+}
+
+model AiInsight {
+  id         String        @id @default(cuid())
+  tenantId   String
+  type       AiInsightType @default(summary)
+  title      String
+  body       Json
+  model      String        @default("offline")
+  tokensUsed Int           @default(0)
+  createdById String?
+  createdAt  DateTime      @default(now())
+
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy User?  @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt(sort: Desc)])
+}
