@@ -25,18 +25,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 COPY prisma ./prisma
-# Render injects $PORT (default 10000) — do not hardcode EXPOSE, and disable HEALTHCHECK
-# until the service is stable (Render does its own port scan + /health/live check).
-EXPOSE 10000
-# HEALTHCHECK disabled for Render initial deploy — enable after port binding is verified
-# HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-#   CMD wget -qO- http://localhost:${PORT:-10000}/api/v1/health/live || exit 1
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -qO- http://localhost:${PORT:-3000}/api/v1/health/live || exit 1
 CMD ["node", "dist/main.js"]
-
-# ---- Worker ----
-FROM base AS worker
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
-COPY prisma ./prisma
-CMD ["node", "dist/workers/worker.js"]

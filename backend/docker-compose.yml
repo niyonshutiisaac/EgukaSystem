@@ -44,25 +44,6 @@ services:
     # Run migrations on deploy (idempotent). The direct URL is required for migrations.
     command: sh -c "npx prisma migrate deploy && node dist/main.js"
 
-  worker:
-    build:
-      context: .
-      target: worker
-    restart: unless-stopped
-    environment:
-      NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: redis://redis:6379
-      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
-      GROQ_API_KEY: ${GROQ_API_KEY}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
-      OLLAMA_URL: ${OLLAMA_URL}
-    depends_on:
-      redis:
-        condition: service_healthy
-
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
