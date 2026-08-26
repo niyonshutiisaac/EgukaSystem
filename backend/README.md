@@ -17,7 +17,7 @@ horizontally scalable, Redis-cached, free-AI-model powered.
 
 | Concern | Implementation |
 |---|---|
-| Scale | Stateless API replicas behind Nginx LB; JWT (no session memory); `docker compose up -d --scale api=4` |
+| Scale | Stateless API (JWT); VPS: Nginx LB `docker compose up -d --scale api=4` · Render: native horizontal autoscaling (no Nginx needed) |
 | Concurrency | Atomic check-and-decrement stock updates (no lost updates); interactive transactions for sales/batches |
 | Speed | Cache-aside Redis (tenant profile, plans, dashboard 60s), keyset pagination, composite `(tenantId, ...)` indexes |
 | Safety | Idempotency keys on POS sales (Redis in-flight lock + DB unique constraint), rotating refresh tokens, seat/plan enforcement server-side |
@@ -39,14 +39,41 @@ npm run prisma:seed           # plans + superadmin (from env)
 npm run start:dev             # http://localhost:3000/api/v1
 ```
 
-Swagger docs: http://localhost:3000/docs
+Swagger docs: http://localhost:3000/docs — Production: https://egukasystem-api.onrender.com/docs
 
 Apply the initial schema to Neon:
 ```bash
 npx prisma migrate deploy     # uses DATABASE_URL_DIRECT
 ```
 
-## Deploy (VPS + Docker)
+## Deploy
+
+### Production (Render + Vercel) — current setup
+
+- **API:** https://egukasystem-api.onrender.com (`backend/` on Render Web Service, Node 22)
+- **Web:** https://egukasystem.vercel.app (root `vite` on Vercel, `VITE_API_URL=https://egukasystem-api.onrender.com/api/v1`)
+- **DB:** Neon pooled `DATABASE_URL` + `DATABASE_URL_DIRECT` (migrations)
+- **Cache / Rate-limit:** External Redis (Upstash or Render Redis) via `REDIS_URL`
+
+Render deploy:
+```bash
+# Render → Web Service (Node 22), Root Directory = backend
+Build:  npm ci && npx prisma generate && npm run build
+Start:  sh -c "npx prisma migrate deploy && node dist/main.js"
+Health: /api/v1/health/live
+Env:    DATABASE_URL, DATABASE_URL_DIRECT, REDIS_URL, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET,
+        CORS_ORIGINS=https://egukasystem.vercel.app,http://localhost:5173
+        FRONTEND_URL=https://egukasystem.vercel.app  API_URL=https://egukasystem-api.onrender.com
+```
+
+Vercel deploy:
+```bash
+# Vercel → Project root = Ebusine/
+Build:  npm run build   (tsc && vite build → dist/)
+Env:    VITE_API_URL=https://egukasystem-api.onrender.com/api/v1
+```
+
+### VPS + Docker (alternative)
 
 ```bash
 cp .env.example .env
@@ -55,7 +82,7 @@ docker compose up -d
 docker compose up -d --scale api=4
 ```
 
-Nginx (deploy/nginx.conf) load-balances `api` replicas, TLS-ready, health-checked.
+Nginx (deploy/nginx.conf) load-balances `api` replicas, TLS-ready, health-checked — used only for VPS, NOT on Render (see scaling notes below).
 Postgres stays fully managed on Neon — nothing to run.
 
 ## Scripts

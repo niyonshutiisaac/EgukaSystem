@@ -5,6 +5,8 @@ export interface AppConfig {
   port: number;
   appName: string;
   corsOrigins: string[];
+  frontendUrl: string;
+  apiUrl: string;
 }
 
 export interface DatabaseConfig {
@@ -43,10 +45,14 @@ export const appConfig = registerAs('app', (): AppConfig => ({
   nodeEnv: process.env.NODE_ENV ?? 'development',
   port: parseInt(process.env.PORT ?? '3000', 10),
   appName: process.env.APP_NAME ?? 'EgukaSystem',
-  corsOrigins: (process.env.CORS_ORIGINS ?? 'http://localhost:5173')
+  corsOrigins: (
+    process.env.CORS_ORIGINS ?? 'http://localhost:5173,https://egukasystem.vercel.app'
+  )
     .split(',')
     .map((o) => o.trim())
     .filter(Boolean),
+  frontendUrl: process.env.FRONTEND_URL ?? 'https://egukasystem.vercel.app',
+  apiUrl: process.env.API_URL ?? 'https://egukasystem-api.onrender.com',
 }));
 
 export const databaseConfig = registerAs('database', (): DatabaseConfig => ({

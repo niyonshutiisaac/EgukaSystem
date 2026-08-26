@@ -19,10 +19,13 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit(): void {
     try {
+      const isTls = this.url.startsWith('rediss://');
       this.client = new Redis(this.url, {
         maxRetriesPerRequest: null,
         lazyConnect: false,
         commandTimeout: 2000,
+        // Upstash/Render TLS needs this; ioredis auto-detects rediss:// but be explicit for prod
+        ...(isTls ? { tls: {} } : {}),
         retryStrategy: (times) => Math.min(times * 200, 5000),
       });
       this.client.on('error', (err) => {

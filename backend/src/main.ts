@@ -13,6 +13,10 @@ async function bootstrap(): Promise<void> {
   const config = app.get(ConfigService);
   const logger = new Logger('Bootstrap');
 
+  // Trust Render's proxy (needed for correct IP + secure cookies behind LB)
+  const expressApp = app.getHttpAdapter().getInstance();
+  expressApp.set('trust proxy', 1);
+
   app.use(helmet());
   app.use(compression());
   app.use(
@@ -22,9 +26,15 @@ async function bootstrap(): Promise<void> {
     }),
   );
 
+  const corsOrigins = config.get<string[]>('app.corsOrigins') ?? [
+    'http://localhost:5173',
+    'https://egukasystem.vercel.app',
+  ];
   app.enableCors({
-    origin: config.get<string[]>('app.corsOrigins') ?? ['http://localhost:5173'],
+    origin: corsOrigins,
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
   app.setGlobalPrefix('api');
@@ -46,6 +56,8 @@ async function bootstrap(): Promise<void> {
     .setTitle('EgukaSystem API')
     .setDescription('Multi-tenant Business Operating System for Rwandan SMEs')
     .setVersion('1.0')
+    .addServer('https://egukasystem-api.onrender.com', 'Production (Render)')
+    .addServer('http://localhost:3000', 'Local')
     .addBearerAuth()
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
@@ -54,6 +66,8 @@ async function bootstrap(): Promise<void> {
   const port = config.get<number>('app.port') ?? 3000;
   await app.listen(port, '0.0.0.0');
   logger.log(`EgukaSystem API running on http://0.0.0.0:${port} (${config.get('app.nodeEnv')})`);
+  logger.log(`CORS origins: ${(corsOrigins ?? []).join(', ')}`);
+  logger.log(`Docs: http://0.0.0.0:${port}/docs`);
 }
 
 void bootstrap();

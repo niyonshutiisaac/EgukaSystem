@@ -1,0 +1,48 @@
+# Render Blueprint — EgukaSystem API
+# Apply via Render Dashboard → Blueprints → New → connect repo
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: egukasystem-api
+    runtime: node
+    plan: free # change to starter/standard for autoscaling + no sleep
+    region: frankfurt # closest to Rwanda; use oregon/singapore as alt
+    branch: main
+    rootDir: backend
+    buildCommand: npm ci && npx prisma generate && npm run build
+    startCommand: sh -c "npx prisma migrate deploy && node dist/main.js"
+    healthCheckPath: /api/v1/health/live
+    autoDeploy: false
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000 # Render injects $PORT; app reads it via config
+      - key: DATABASE_URL
+        sync: false # set in dashboard — Neon pooled URL
+      - key: DATABASE_URL_DIRECT
+        sync: false
+      - key: REDIS_URL
+        sync: false # Upstash rediss://... or Render Redis
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: https://egukasystem.vercel.app,http://localhost:5173
+      - key: FRONTEND_URL
+        value: https://egukasystem.vercel.app
+      - key: API_URL
+        value: https://egukasystem-api.onrender.com
+      - key: APP_NAME
+        value: EgukaSystem
+      # Optional AI keys — sync: false so you can leave empty (offline fallback works)
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OLLAMA_URL
+        sync: false
