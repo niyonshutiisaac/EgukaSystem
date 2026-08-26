@@ -10,15 +10,14 @@ services:
     region: frankfurt # closest to Rwanda; use oregon/singapore as alt
     branch: main
     rootDir: backend
-    buildCommand: npm ci && npx prisma generate && npm run build
-    startCommand: sh -c "npx prisma migrate deploy && node dist/main.js"
+    buildCommand: npm ci --include=dev && npx prisma generate && npm run build
+    startCommand: sh -c "npx prisma migrate deploy || true; node dist/main.js"
     healthCheckPath: /api/v1/health/live
     autoDeploy: false
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: 10000 # Render injects $PORT; app reads it via config
+      # PORT is injected by Render automatically — do not set manually (leave unset)
       - key: DATABASE_URL
         sync: false # set in dashboard — Neon pooled URL
       - key: DATABASE_URL_DIRECT

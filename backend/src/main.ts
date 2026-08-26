@@ -63,11 +63,19 @@ async function bootstrap(): Promise<void> {
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('docs', app, document);
 
-  const port = config.get<number>('app.port') ?? 3000;
+  // Render provides PORT env var (e.g. 10000). Fallback to 3000 for local.
+  const rawPort = process.env.PORT ?? config.get<string>('app.port') ?? '3000';
+  const port = parseInt(String(rawPort), 10) || 3000;
   await app.listen(port, '0.0.0.0');
   logger.log(`EgukaSystem API running on http://0.0.0.0:${port} (${config.get('app.nodeEnv')})`);
   logger.log(`CORS origins: ${(corsOrigins ?? []).join(', ')}`);
   logger.log(`Docs: http://0.0.0.0:${port}/docs`);
+  logger.log(`Health: http://0.0.0.0:${port}/api/v1/health/live`);
 }
 
-void bootstrap();
+void bootstrap().catch((err) => {
+  // Ensure Render sees the error instead of silently failing port scan
+  // eslint-disable-next-line no-console
+  console.error('Bootstrap failed:', err);
+  process.exit(1);
+});
