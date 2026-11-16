@@ -1,4 +1,3 @@
----
 # EgukaSystem 🏢
 
 **A Multi-Tenant SaaS Platform Empowering Rwandan SMEs to Manage Their Entire Business Operations — From Point of Sale to Production, Inventory, and AI-Powered Insights.**
@@ -10,7 +9,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Live Demo](https://img.shields.io/badge/Live_Demo-egukasystem.vercel.app-success)](https://egukasystem.vercel.app)
 
----
 
 ## 📖 Table of Contents
 
